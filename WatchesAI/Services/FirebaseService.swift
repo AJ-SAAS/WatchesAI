@@ -1,45 +1,16 @@
 import Firebase
 import FirebaseFirestore
-import FirebaseAuth
 import FirebaseStorage
 
 class FirebaseService {
     static let shared = FirebaseService()
     private let db = Firestore.firestore()
+    private let storage = Storage.storage()
     
     private init() {}
     
-    // Sign in anonymously
-    func signInAnonymously(completion: @escaping (Result<String, Error>) -> Void) {
-        Auth.auth().signInAnonymously { result, error in
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            guard let user = result?.user else { return }
-            completion(.success(user.uid))
-        }
-    }
-    
-    // Add a watch to Firestore
-    func addWatch(_ watch: Watch, forUser uid: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        do {
-            let data = try Firestore.Encoder().encode(watch)
-            db.collection("users").document(uid).collection("watches").document(watch.id).setData(data) { error in
-                if let error = error {
-                    completion(.failure(error))
-                } else {
-                    completion(.success(()))
-                }
-            }
-        } catch {
-            completion(.failure(error))
-        }
-    }
-    
-    // Fetch watches for a user
-    func fetchWatches(forUser uid: String, completion: @escaping (Result<[Watch], Error>) -> Void) {
-        db.collection("users").document(uid).collection("watches").getDocuments { snapshot, error in
+    func fetchSwipeCards(completion: @escaping (Result<[Watch], Error>) -> Void) {
+        db.collection("swipeCards").getDocuments { snapshot, error in
             if let error = error {
                 completion(.failure(error))
                 return
@@ -48,34 +19,104 @@ class FirebaseService {
                 completion(.success([]))
                 return
             }
-            let watches = documents.compactMap { try? $0.data(as: Watch.self) }
+            let watches = documents.compactMap { doc -> Watch? in
+                let data = doc.data()
+                return Watch(
+                    id: doc.documentID,
+                    brand: data["brand"] as? String ?? "",
+                    model: data["model"] as? String ?? "",
+                    year: data["year"] as? String ?? "",
+                    movement: data["movement"] as? String ?? "",
+                    material: data["material"] as? String ?? "",
+                    style: data["style"] as? String ?? "",
+                    value: data["value"] as? Double ?? 0.0,
+                    type: data["type"] as? String ?? "Collection",
+                    complications: data["complications"] as? String ?? "",
+                    imageURL: data["imageURL"] as? String
+                )
+            }
             completion(.success(watches))
         }
     }
-
-    // Upload watch image to Firebase Storage
-    func uploadImage(_ image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
+    
+    func fetchUserWatches(for userID: String, completion: @escaping (Result<[Watch], Error>) -> Void) {
+        db.collection("users").document(userID).collection("watches").getDocuments { snapshot, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let documents = snapshot?.documents else {
+                completion(.success([]))
+                return
+            }
+            let watches = documents.compactMap { doc -> Watch? in
+                let data = doc.data()
+                return Watch(
+                    id: doc.documentID,
+                    brand: data["brand"] as? String ?? "",
+                    model: data["model"] as? String ?? "",
+                    year: data["year"] as? String ?? "",
+                    movement: data["movement"] as? String ?? "",
+                    material: data["material"] as? String ?? "",
+                    style: data["style"] as? String ?? "",
+                    value: data["value"] as? Double ?? 0.0,
+                    type: data["type"] as? String ?? "Collection",
+                    complications: data["complications"] as? String ?? "",
+                    imageURL: data["imageURL"] as? String
+                )
+            }
+            completion(.success(watches))
+        }
+    }
+    
+    func saveWatch(_ watch: Watch, for userID: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        let watchData: [String: Any] = [
+            "id": watch.id,
+            "brand": watch.brand,
+            "model": watch.model,
+            "year": watch.year,
+            "movement": watch.movement,
+            "material": watch.material,
+            "style": watch.style,
+            "value": watch.value,
+            "type": watch.type,
+            "complications": watch.complications,
+            "imageURL": watch.imageURL as Any
+        ]
+        db.collection("users").document(userID).collection("watches").document(watch.id).setData(watchData) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func deleteWatch(_ watch: Watch, for userID: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("users").document(userID).collection("watches").document(watch.id).delete { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func uploadPhoto(_ image: UIImage, for watchID: String, userID: String, completion: @escaping (Result<String, Error>) -> Void) {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             completion(.failure(NSError(domain: "ImageError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not compress image"])))
             return
         }
-
-        let filename = UUID().uuidString + ".jpg"
-        let storageRef = Storage.storage().reference().child("watch_images/\(filename)")
-
+        let storageRef = storage.reference().child("users/\(userID)/watches/\(watchID).jpg")
         storageRef.putData(imageData, metadata: nil) { _, error in
             if let error = error {
                 completion(.failure(error))
                 return
             }
-
             storageRef.downloadURL { url, error in
                 if let error = error {
                     completion(.failure(error))
-                    return
-                }
-
-                if let urlString = url?.absoluteString {
+                } else if let urlString = url?.absoluteString {
                     completion(.success(urlString))
                 } else {
                     completion(.failure(NSError(domain: "ImageError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not get download URL"])))
@@ -84,4 +125,3 @@ class FirebaseService {
         }
     }
 }
-
